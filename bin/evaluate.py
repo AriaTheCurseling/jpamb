@@ -160,7 +160,7 @@ def evaluate(experiment, timeout, iterations, verbose, filter_methods, filter_to
             logger.debug(f"Testing {tool_name!r}")
             try:
                 fpred, time_ns = run_cmd(
-                    [tool["executable"], m], timeout=timeout, logger=logger
+                    ['python', tool["executable"], m], timeout=timeout, logger=logger
                 )
             except subprocess.CalledProcessError as e:
                 logger.warning(f"Tool {tool_name!r} failed with {e}")
