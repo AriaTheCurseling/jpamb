@@ -57,11 +57,15 @@ def experiment_parser(ctx_, parms_, experiment):
                 context + f"'tools.{tn}.technologies' should be a list"
             )
 
-        if not ("executable" in t and Path(t["executable"]).is_file()):
+        if not ("executable" in t) or not (
+            isinstance(t["executable"], list) or isinstance(t["executable"], str)
+        ):
             raise click.UsageError(
                 context
-                + f"'tools.{tn}.executable' should be a path to an existing file"
+                + f"'tools.{tn}.executable should be an executable or a list of arguments"
             )
+        elif isinstance(t["executable"], str):
+            t["executable"] = [t["executable"]]
 
     if not "machine" in experiment:
         raise click.UsageError(context + "no 'machine'")
@@ -79,13 +83,6 @@ def experiment_parser(ctx_, parms_, experiment):
     return experiment
 
 
-def re_parser(ctx_, parms_, expr):
-    import re
-
-    if expr:
-        return re.compile(expr)
-
-
 def calibrate(sieve_exe, log_calibration):
     calibrators = [100_000, 100_000]
     calibration = 0
@@ -101,7 +98,7 @@ def calibrate(sieve_exe, log_calibration):
     return calibration
 
 
-@click.command
+@click.command()
 @click.option(
     "--timeout",
     show_default=True,
@@ -126,20 +123,30 @@ def calibrate(sieve_exe, log_calibration):
     help="number of iterations.",
 )
 @click.option("-v", "--verbose", count=True)
+@click.option("-o", "--output", show_default=True, default=WORKFOLDER / "result.json")
 @click.argument("EXPERIMENT", callback=experiment_parser)
-def evaluate(experiment, timeout, iterations, verbose, filter_methods, filter_tools):
+def evaluate(
+    experiment, timeout, iterations, verbose, filter_methods, filter_tools, output
+):
     """Given an command check if it can predict the results."""
     import random, itertools
 
     logger = setup_logger(verbose)
-    suite = Suite(WORKFOLDER, QUERIES)
+    suite = Suite(WORKFOLDER, QUERIES, logger)
     tools = experiment["tools"]
     by_tool = defaultdict(list)
+
+    with open(WORKFOLDER / "CITATION.cff") as f:
+        import yaml
+
+        version = yaml.safe_load(f)["version"]
+
+    logger.info(f"Version {version}")
 
     sieve = WORKFOLDER / "timer" / "sieve.c"
 
     logger.info(f"Building timer from {sieve}")
-    sieve_exe = build_c(sieve)
+    sieve_exe = build_c(sieve, logger)
 
     for i in range(iterations):
         calibration = calibrate(sieve_exe, lambda **kwargs: ())
@@ -147,26 +154,28 @@ def evaluate(experiment, timeout, iterations, verbose, filter_methods, filter_to
 
     for m, cases in Case.by_methodid(suite.cases()):
         if filter_methods and not filter_methods.search(m):
-            logger.debug(f"{m} did not match {filter_methods}")
+            logger.trace(f"{m} did not match {filter_methods}")
             continue
 
         for n, (tool_name, tool) in itertools.product(
             range(iterations), random.sample(sorted(tools.items()), k=len(tools))
         ):
             if filter_tools and not filter_tools.search(tool_name):
-                logger.debug(f"{tool_name} did not match {filter_tools}")
+                logger.trace(f"{tool_name} did not match {filter_tools}")
                 continue
 
             logger.debug(f"Testing {tool_name!r}")
             try:
                 fpred, time_ns = run_cmd(
-                    ['python', tool["executable"], m], timeout=timeout, logger=logger
+                    tool["executable"] + [m],
+                    timeout=timeout,
+                    logger=logger,
                 )
             except subprocess.CalledProcessError as e:
                 logger.warning(f"Tool {tool_name!r} failed with {e}")
-                fpred, time_ns = "", 0
+                fpred, time_ns = "", float("NaN")
             except subprocess.TimeoutExpired:
-                logger.warning(f"Tool {tool_name!r} timedout")
+                logger.warning(f"Tool {tool_name!r} timed out")
                 fpred, time_ns = "", float("NaN")
 
             total = 0
@@ -184,11 +193,11 @@ def evaluate(experiment, timeout, iterations, verbose, filter_methods, filter_to
                     query, pred = line.split(";")
                     logger.debug(f"response: {line}")
                 except ValueError:
-                    logger.warning("Tool produced bad output")
+                    logger.warning(f"Tool {tool_name!r} produced bad output")
                     logger.warning(line)
                     continue
                 if not query in QUERIES:
-                    logger.warning("{q!r} not a known query: {QUERIES}")
+                    logger.warning(f"{query!r} not a known query")
                     continue
                 prediction = Prediction.parse(pred)
                 predictions[query] = prediction
@@ -239,8 +248,12 @@ def evaluate(experiment, timeout, iterations, verbose, filter_methods, filter_to
         )
 
     experiment["timestamp"] = int(datetime.now().timestamp() * 1000)
+    experiment["version"] = version
 
-    print(json.dumps(experiment))
+    with open(output, "w", encoding="utf-8") as fp:
+        json.dump(experiment, fp)
+
+    logger.success(f"Written results to {output!r}")
 
 
 if __name__ == "__main__":
