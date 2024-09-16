@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """ The skeleton for writing an interpreter given the bytecode.
-"""
+""" 
 
 from dataclasses import dataclass
 from pathlib import Path

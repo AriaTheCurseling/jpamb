@@ -1,18 +1,21 @@
 ﻿# Choose a group name, remember it will be made public so choose 
 # a random string if you want to be anonymous
-group_name: Void
+group_name: Group 4
 
 # Answer true if the data you provide can be used anonomized for science!
 for_science: true
 
 # Underneath here add the tools which you want to run
 tools:
-  test: 
+  bytecoder: 
     technologies:
+      - bytecode
+      - static
       - python
 
-    executable: solutions/qualifiedGuess.py
-    # executable: solutions/guess.py
+    executable: 
+      - python 
+      - ../pa4/Bytecode/Bytecode.py
 
 # Describe your machine here (for research purposes) 
 machine:
